@@ -38,7 +38,7 @@ check_system() {
     error "Unsupported system. This script only supports Debian, Ubuntu, or CentOS."
   fi
 
-  REGEX=("debian" "ubuntu" "centos|red hat|kernel|alma|rocky")
+  REGEX=("debian" "Ubuntu" "centos|red hat|kernel|alma|rocky")
   RELEASE=("Debian" "Ubuntu" "CentOS")
   MAJOR=("9" "20" "7")
   PACKAGE_UPDATE=("apt -y update" "apt -y update" "yum -y update --skip-broken")
