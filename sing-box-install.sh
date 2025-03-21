@@ -141,4 +141,221 @@ input_domains() {
   reading "Enter TLS server name for VLESS Reality (default: $TLS_SERVER_DEFAULT): " TLS_SERVER
   TLS_SERVER=${TLS_SERVER:-$TLS_SERVER_DEFAULT}
 
-  reading "Enter VMESS
+  reading "Enter VMESS WebSocket host domain (must be resolved in Cloudflare with origin rule to port $VMESS_PORT, default: $VMESS_HOST_DEFAULT): " VMESS_HOST
+  VMESS_HOST=${VMESS_HOST:-$VMESS_HOST_DEFAULT}
+}
+
+# 配置 TUN 模式所需的系统设置
+configure_tun() {
+  info "Configuring system for TUN mode..."
+  # 启用 IP 转发
+  sysctl -w net.ipv4.ip_forward=1
+  echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+
+  # 检查 TUN 设备
+  [ -e /dev/net/tun ] || error "TUN device not found. Your VPS may not support TUN mode (e.g., OpenVZ)."
+
+  # 设置 Sing-box 权限
+  setcap cap_net_admin,cap_net_bind_service+ep $WORK_DIR/sing-box || error "Failed to set capabilities for Sing-box. TUN mode may not work."
+}
+
+# 生成 Sing-box 配置文件
+generate_config() {
+  info "Generating Sing-box configuration..."
+  mkdir -p $WORK_DIR/conf
+
+  # 生成 Reality 密钥对
+  REALITY_KEYS=$($WORK_DIR/sing-box generate reality-keypair)
+  REALITY_PRIVATE=$(echo "$REALITY_KEYS" | grep "PrivateKey" | awk '{print $2}')
+  REALITY_PUBLIC=$(echo "$REALITY_KEYS" | grep "PublicKey" | awk '{print $2}')
+
+  # Sing-box 配置文件
+  cat > $WORK_DIR/config.json << EOF
+{
+  "log": {
+    "level": "info"
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "remote",
+        "address": "tls://8.8.8.8"
+      },
+      {
+        "tag": "local",
+        "address": "223.5.5.5",
+        "detour": "direct"
+      }
+    ],
+    "rules": [
+      {
+        "outbound": "direct",
+        "server": "local"
+      },
+      {
+        "outbound": "any",
+        "server": "remote"
+      }
+    ],
+    "fakeip": {
+      "enabled": true,
+      "inet4_range": "198.18.0.0/15"
+    }
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-in",
+      "listen": "::",
+      "listen_port": $VLESS_PORT,
+      "users": [
+        {
+          "uuid": "$UUID",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "$TLS_SERVER",
+        "reality": {
+          "enabled": true,
+          "private_key": "$REALITY_PRIVATE",
+          "public_key": "$REALITY_PUBLIC",
+          "short_id": ["12345678"]
+        }
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "vmess-in",
+      "listen": "::",
+      "listen_port": $VMESS_PORT,
+      "users": [
+        {
+          "uuid": "$UUID",
+          "alterId": 0
+        }
+      ],
+      "transport": {
+        "type": "ws",
+        "path": "/vmess",
+        "headers": {
+          "Host": "$VMESS_HOST"
+        }
+      }
+    },
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "tun0",
+      "mtu": 1500,
+      "inet4_address": "172.19.0.1/30",
+      "auto_route": true,
+      "strict_route": true,
+      "endpoint_independent_nat": false,
+      "stack": "system",
+      "include_interface": ["eth0"],
+      "exclude_interface": []
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "geosite": ["cn"],
+        "geoip": ["cn", "private"],
+        "outbound": "direct"
+      },
+      {
+        "ip_cidr": ["224.0.0.0/3", "ff00::/8"],
+        "outbound": "block"
+      }
+    ],
+    "final": "direct"
+  }
+}
+EOF
+}
+
+# 设置 systemd 服务
+setup_service() {
+  info "Setting up systemd service..."
+  cat > /etc/systemd/system/sing-box.service << EOF
+[Unit]
+Description=Sing-box Proxy Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$WORK_DIR/sing-box run -c $WORK_DIR/config.json
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable sing-box
+  systemctl start sing-box
+  [ "$(systemctl is-active sing-box)" = "active" ] || error "Failed to start Sing-box service."
+}
+
+# 显示节点信息
+show_info() {
+  info "Sing-box setup completed successfully!"
+  echo -e "\n========================================\n"
+  info "VLESS (Reality) Connection Info:"
+  echo "Address: $(curl -s ifconfig.me)"
+  echo "Port: $VLESS_PORT"
+  echo "UUID: $UUID"
+  echo "Flow: xtls-rprx-vision"
+  echo "TLS Server Name: $TLS_SERVER"
+  echo "Public Key: $REALITY_PUBLIC"
+  echo "Short ID: 12345678"
+  echo -e "\nVLESS URL: vless://$UUID@$(curl -s ifconfig.me):$VLESS_PORT?security=reality&sni=$TLS_SERVER&fp=chrome&pbk=$REALITY_PUBLIC&sid=12345678&flow=xtls-rprx-vision#VLESS-Reality"
+
+  echo -e "\n----------------------------------------\n"
+  info "VMESS (WebSocket) Connection Info:"
+  echo "Address: $VMESS_HOST"
+  echo "Port: $VMESS_PORT"
+  echo "UUID: $UUID"
+  echo "AlterId: 0"
+  echo "Transport: ws"
+  echo "Path: /vmess"
+  echo -e "\nVMESS URL: vmess://$(echo -n "{\"v\":\"2\",\"ps\":\"VMESS-WS\",\"add\":\"$VMESS_HOST\",\"port\":$VMESS_PORT,\"id\":\"$UUID\",\"aid\":0,\"net\":\"ws\",\"type\":\"none\",\"host\":\"$VMESS_HOST\",\"path\":\"/vmess\",\"tls\":\"\"}" | base64 -w 0)"
+
+  echo -e "\n========================================\n"
+  info "TUN Mode is enabled. Use the above URLs in a client that supports TUN mode (e.g., Sing-box client)."
+  info "Configuration file: $WORK_DIR/config.json"
+}
+
+# 主函数
+main() {
+  check_root
+  check_system
+  check_arch
+  install_dependencies
+  download_sing_box
+  input_ports
+  input_uuid
+  input_domains
+  configure_tun
+  generate_config
+  setup_service
+  show_info
+}
+
+# 清理临时文件
+trap "rm -rf $TEMP_DIR >/dev/null 2>&1" EXIT
+
+main
