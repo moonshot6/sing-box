@@ -40,7 +40,7 @@ check_system() {
 
   REGEX=("debian" "ubuntu" "centos|red hat|kernel|alma|rocky")
   RELEASE=("Debian" "Ubuntu" "CentOS")
-  MAJOR=("9" "20" "7")  # 将 Ubuntu 的最低版本从 16 改为 20，支持 Ubuntu 20.04 及以上
+  MAJOR=("9" "20" "7")
   PACKAGE_UPDATE=("apt -y update" "apt -y update" "yum -y update --skip-broken")
   PACKAGE_INSTALL=("apt -y install" "apt -y install" "yum -y install")
   PACKAGE_UNINSTALL=("apt -y autoremove" "apt -y autoremove" "yum -y autoremove")
