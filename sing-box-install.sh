@@ -45,6 +45,10 @@ check_system() {
   PACKAGE_INSTALL=("apt -y install" "apt -y install" "yum -y install")
   PACKAGE_UNINSTALL=("apt -y autoremove" "apt -y autoremove" "yum -y autoremove")
 
+  # 调试：打印 SYS 和 REGEX
+  echo "DEBUG: SYS=$SYS"
+  echo "DEBUG: REGEX=${REGEX[@]}"
+
   for i in "${!REGEX[@]}"; do
     if [[ "${SYS}" =~ ${REGEX[i]} ]]; then
       SYSTEM="${RELEASE[i]}"
@@ -52,6 +56,9 @@ check_system() {
       break
     fi
   done
+
+  # 调试：打印 SYSTEM
+  echo "DEBUG: SYSTEM=$SYSTEM"
 
   [ -z "$SYSTEM" ] && error "Unsupported system: $SYS. This script only supports Debian, Ubuntu, or CentOS."
   VERSION_NUM=$(echo "$SYS" | sed "s/[^0-9.]//g" | cut -d. -f1)
