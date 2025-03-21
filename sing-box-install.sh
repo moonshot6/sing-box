@@ -38,15 +38,15 @@ check_system() {
     error "Unsupported system. This script only supports Debian, Ubuntu, or CentOS."
   fi
 
-  REGEX=("debian" "Ubuntu" "centos|red hat|kernel|alma|rocky")
+  REGEX=("debian" "ubuntu" "centos|red hat|kernel|alma|rocky")
   RELEASE=("Debian" "Ubuntu" "CentOS")
-  MAJOR=("9" "16" "7")
+  MAJOR=("9" "20" "7")  # 将 Ubuntu 的最低版本从 16 改为 20，支持 Ubuntu 20.04 及以上
   PACKAGE_UPDATE=("apt -y update" "apt -y update" "yum -y update --skip-broken")
   PACKAGE_INSTALL=("apt -y install" "apt -y install" "yum -y install")
   PACKAGE_UNINSTALL=("apt -y autoremove" "apt -y autoremove" "yum -y autoremove")
 
   for i in "${!REGEX[@]}"; do
-    if [[ "${SYS,,}" =~ ${REGEX[i]} ]]; then
+    if [[ "${SYS}" =~ ${REGEX[i]} ]]; then
       SYSTEM="${RELEASE[i]}"
       INT=$i
       break
@@ -54,7 +54,8 @@ check_system() {
   done
 
   [ -z "$SYSTEM" ] && error "Unsupported system: $SYS. This script only supports Debian, Ubuntu, or CentOS."
-  if [[ "$(echo "$SYS" | sed "s/[^0-9.]//g" | cut -d. -f1)" -lt "${MAJOR[$INT]}" ]]; then
+  VERSION_NUM=$(echo "$SYS" | sed "s/[^0-9.]//g" | cut -d. -f1)
+  if [[ -z "$VERSION_NUM" || "$VERSION_NUM" -lt "${MAJOR[$INT]}" ]]; then
     error "System version too old: $SYS. Minimum supported version is ${RELEASE[$INT]} ${MAJOR[$INT]}."
   fi
 }
