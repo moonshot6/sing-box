@@ -214,13 +214,28 @@ download() {
     }
 }
 
-# Get server IP (optional)
+# Get server IP (improved, automatic)
 get_ip() {
-    read -p "是否获取服务器公网 IP？(y/n, 默认 n): " choice
-    [[ "$choice" != "y" ]] && return
-    export "$(_wget -4 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
-    [[ -z $ip ]] && export "$(_wget -6 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip=)" &>/dev/null
-    [[ -z $ip ]] && msg warn "获取服务器 IP 失败。"
+    msg warn "尝试获取服务器公网 IP..."
+    # Try multiple methods to get the IP
+    ip=$(_wget -4 -qO- https://one.one.one.one/cdn-cgi/trace | grep ip= | cut -d '=' -f 2)
+    [[ -z $ip ]] && ip=$(curl -4 -s ifconfig.me)
+    [[ -z $ip ]] && ip=$(curl -4 -s icanhazip.com)
+    [[ -z $ip ]] && ip=$(curl -4 -s ipinfo.io/ip)
+
+    if [[ -z $ip ]]; then
+        msg err "无法自动获取服务器公网 IP。"
+        read -p "请输入服务器公网 IP 地址: " manual_ip
+        if [[ -z $manual_ip ]]; then
+            err "未提供有效的 IP 地址，无法生成 VLESS URL。"
+        else
+            ip=$manual_ip
+            msg ok "使用手动输入的 IP 地址: $ip"
+        fi
+    else
+        msg ok "成功获取服务器公网 IP: $ip"
+    fi
+    export ip=$ip
 }
 
 # Check TUN support
@@ -275,6 +290,10 @@ EOF
 create_default_config() {
     uuid=$(generate_uuid)
     generate_keypair
+    # Export variables for use in other functions
+    export uuid=$uuid
+    export private_key=$private_key
+    export public_key=$public_key
 
     cat > $is_config_json << EOF
 {
@@ -440,11 +459,15 @@ EOF
 # Generate VLESS URL
 generate_vless_url() {
     if [[ -z $ip ]]; then
-        msg warn "未获取到服务器公网 IP，无法生成 VLESS URL。请手动设置 IP 地址。"
-        return
+        msg err "未获取到服务器公网 IP，无法生成 VLESS URL。"
+        return 1
+    fi
+    if [[ -z $uuid || -z $public_key ]]; then
+        msg err "UUID 或 Public Key 未生成，无法生成 VLESS URL。"
+        return 1
     fi
     vless_url="vless://$uuid@$ip:443?security=reality&encryption=none&flow=xtls-rprx-vision&type=tcp&fp=chrome&sni=www.microsoft.com&pbk=$public_key&sid=12345678#VLESS-REALITY"
-    echo "VLESS 分享链接："
+    msg ok "VLESS 分享链接："
     echo "$vless_url"
 }
 
@@ -832,7 +855,7 @@ main() {
     # Download core
     [[ ! $is_core_file ]] && download core
 
-    # Get server IP
+    # Get server IP (automatically)
     get_ip
 
     # Check TUN support
