@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Check if script is already running
+lock_file="/tmp/sing-box-install.lock"
+if [[ -f $lock_file ]]; then
+    err "脚本已经在运行中，请勿重复执行。"
+fi
+touch $lock_file
+trap 'rm -f $lock_file' EXIT
+
 # Author: moonshot6
 # GitHub: https://github.com/moonshot6/sing-box
 # License: GPL-3.0
@@ -222,6 +230,7 @@ get_ip() {
     [[ -z $ip ]] && ip=$(curl -4 -s ifconfig.me)
     [[ -z $ip ]] && ip=$(curl -4 -s icanhazip.com)
     [[ -z $ip ]] && ip=$(curl -4 -s ipinfo.io/ip)
+    [[ -z $ip ]] && ip=$(curl -4 -s ip-api.com/json | jq -r .query)
 
     if [[ -z $ip ]]; then
         msg err "无法自动获取服务器公网 IP。"
@@ -458,6 +467,8 @@ EOF
 
 # Generate VLESS URL
 generate_vless_url() {
+    msg ok "开始生成 VLESS 分享链接..."
+    echo "调试信息：IP=$ip, UUID=$uuid, Public Key=$public_key"
     if [[ -z $ip ]]; then
         msg err "未获取到服务器公网 IP，无法生成 VLESS URL。"
         return 1
@@ -883,49 +894,4 @@ main() {
 
     # Create command
     create_management_script
-    ln -sf $is_sh_dir/$is_core.sh $is_sh_bin
-    ln -sf $is_sh_dir/$is_core.sh ${is_sh_bin/$is_core/sb}
-
-    # Chmod
-    chmod +x $is_core_bin $is_sh_bin ${is_sh_bin/$is_core/sb}
-
-    # Create default config
-    msg ok "生成配置文件..."
-    create_default_config
-
-    # Create client config
-    msg ok "生成客户端配置文件..."
-    create_client_config
-
-    # Create systemd service
-    msg ok "创建 systemd 服务..."
-    create_systemd_service
-
-    # Generate VLESS URL
-    msg ok "生成 VLESS 分享链接..."
-    generate_vless_url
-
-    # Show installation summary
-    clear
-    echo
-    echo "========== Sing-box 安装完成 =========="
-    echo "快捷命令：sb 或 sing-box"
-    echo "服务管理："
-    echo "  启动：systemctl start sing-box"
-    echo "  停止：systemctl stop sing-box"
-    echo "  重启：systemctl restart sing-box"
-    echo "  查看状态：systemctl status sing-box"
-    echo "日志查看：tail -f $is_log_dir/sing-box.log"
-    echo "配置文件：$is_config_json"
-    echo "客户端配置文件："
-    echo "  PC 端：$is_subscribe_dir/sing-box-pc.json"
-    echo "  手机端：$is_subscribe_dir/sing-box-phone.json"
-    echo "======================================"
-    echo
-
-    # Remove tmp dir
-    exit_and_del_tmpdir ok
-}
-
-# Start
-main $@
+    ln -sf $is_sh_dir
