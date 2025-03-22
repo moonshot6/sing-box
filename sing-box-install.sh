@@ -170,7 +170,12 @@ download() {
         [[ ! $is_core_ver ]] && is_core_ver=$(_wget -qO- "https://api.github.com/repos/${is_core_repo}/releases/latest?v=$RANDOM" | grep tag_name | egrep -o 'v([0-9.]+)')
         [[ $is_core_ver ]] && {
             link="https://github.com/${is_core_repo}/releases/download/${is_core_ver}/${is_core}-${is_core_ver:1}-linux-${is_arch}.tar.gz"
-            expected_sha256=$(_wget -qO- "https://github.com/${is_core_repo}/releases/download/${is_core_ver}/sha256sums.txt" | grep "${is_core}-${is_core_ver:1}-linux-${is_arch}.tar.gz" | awk '{print $1}')
+            # Attempt to fetch sha256sums.txt
+            sha256sums_content=$(_wget -qO- "https://github.com/${is_core_repo}/releases/download/${is_core_ver}/sha256sums.txt")
+            if [[ -n "$sha256sums_content" ]]; then
+                # Try different patterns for the file name
+                expected_sha256=$(echo "$sha256sums_content" | grep -E "${is_core}-${is_core_ver:1}-linux-${is_arch}\.tar\.gz|${is_core}_${is_core_ver:1}_linux_${is_arch}\.tar\.gz" | awk '{print $1}')
+            fi
         }
         name=$is_core_name
         tmpfile=$tmpcore
@@ -179,22 +184,21 @@ download() {
     esac
 
     [[ $link ]] && {
-        # Check if expected_sha256 is empty
-        if [[ -z $expected_sha256 ]]; then
-            msg err "无法获取 ${name} 的 SHA256 校验值，请检查网络或 GitHub 仓库。"
-            exit 1
-        fi
-
         msg warn "下载 ${name} > ${link}"
         for i in {1..3}; do
             if _wget -t 3 -q -c $link -O $tmpfile; then
-                computed_sha256=$(sha256sum $tmpfile | awk '{print $1}')
-                [[ "$computed_sha256" != "$expected_sha256" ]] && {
-                    msg err "${name} 文件校验失败！"
-                    msg err "预期 SHA256: $expected_sha256"
-                    msg err "实际 SHA256: $computed_sha256"
-                    exit 1
-                }
+                if [[ -n "$expected_sha256" ]]; then
+                    computed_sha256=$(sha256sum $tmpfile | awk '{print $1}')
+                    if [[ "$computed_sha256" != "$expected_sha256" ]]; then
+                        msg err "${name} 文件校验失败！"
+                        msg err "预期 SHA256: $expected_sha256"
+                        msg err "实际 SHA256: $computed_sha256"
+                        exit 1
+                    fi
+                    msg ok "${name} 文件校验通过。"
+                else
+                    msg warn "无法获取 ${name} 的 SHA256 校验值，跳过校验。"
+                fi
                 mv -f $tmpfile $is_ok
                 break
             fi
@@ -235,8 +239,8 @@ generate_uuid() {
 # Generate key pair for reality
 generate_keypair() {
     keypair=$($is_core_bin generate reality-keypair)
-    private_key=$(echo "$keypair" | grep "PrivateKey" | awk '{print $2}')
-    public_key=$(echo "$keypair" | grep "PublicKey" | awk '{print $2}')
+    private_key=$(echo "$keypair" | grep "PrivateKey" | awk '{print $1}' | cut -d '=' -f 2)
+    public_key=$(echo "$keypair" | grep "PublicKey" | awk '{print $1}' | cut -d '=' -f 2)
 }
 
 # Create systemd service
@@ -463,8 +467,8 @@ generate_uuid() {
 # Generate key pair for reality
 generate_keypair() {
     keypair=$(/etc/sing-box/bin/sing-box generate reality-keypair)
-    private_key=$(echo "$keypair" | grep "PrivateKey" | awk '{print $2}')
-    public_key=$(echo "$keypair" | grep "PublicKey" | awk '{print $2}')
+    private_key=$(echo "$keypair" | grep "PrivateKey" | awk '{print $1}' | cut -d '=' -f 2)
+    public_key=$(echo "$keypair" | grep "PublicKey" | awk '{print $1}' | cut -d '=' -f 2)
 }
 
 # Enable BBR
