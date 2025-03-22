@@ -101,6 +101,9 @@ for i in ${tmp_var_lists[*]}; do
     export $i=$tmpdir/$i
 done
 
+# Record the path of the install script
+install_script_path=$(realpath "$0")
+
 # Wget with proxy support
 _wget() {
     [[ $proxy ]] && export https_proxy=$proxy
@@ -434,9 +437,20 @@ EOF
 EOF
 }
 
+# Generate VLESS URL
+generate_vless_url() {
+    if [[ -z $ip ]]; then
+        msg warn "未获取到服务器公网 IP，无法生成 VLESS URL。请手动设置 IP 地址。"
+        return
+    fi
+    vless_url="vless://$uuid@$ip:443?security=reality&encryption=none&flow=xtls-rprx-vision&type=tcp&fp=chrome&sni=www.microsoft.com&pbk=$public_key&sid=12345678#VLESS-REALITY"
+    echo "VLESS 分享链接："
+    echo "$vless_url"
+}
+
 # Create management script
 create_management_script() {
-    cat > $is_sh_dir/sing-box.sh << 'EOF'
+    cat > $is_sh_dir/sing-box.sh << EOF
 #!/bin/bash
 
 # Management script for Sing-box
@@ -445,46 +459,52 @@ red='\e[31m'
 yellow='\e[33m'
 green='\e[92m'
 none='\e[0m'
-_red() { echo -e ${red}$@${none}; }
-_yellow() { echo -e ${yellow}$@${none}; }
-_green() { echo -e ${green}$@${none}; }
+_red() { echo -e \${red}\$@\${none}; }
+_yellow() { echo -e \${yellow}\$@\${none}; }
+_green() { echo -e \${green}\$@\${none}; }
 
 err() {
-    echo -e "\n$(_red 错误!) $@\n" && exit 1
+    echo -e "\n\$(_red 错误!) \$@\n" && exit 1
 }
 
 is_core_dir=/etc/sing-box
-is_config_json=$is_core_dir/config.json
-is_conf_dir=$is_core_dir/conf
-is_subscribe_dir=$is_core_dir/subscribe
+is_config_json=\$is_core_dir/config.json
+is_conf_dir=\$is_core_dir/conf
+is_subscribe_dir=\$is_core_dir/subscribe
+is_log_dir=/var/log/sing-box
+install_script_path="$install_script_path"
+is_core_file="$is_core_file"
+cmd="$cmd"
+is_pkg="$is_pkg"
+tmpdir="$tmpdir"
 
 # Generate UUID
 generate_uuid() {
-    uuid=$(cat /proc/sys/kernel/random/uuid)
-    echo $uuid
+    uuid=\$(cat /proc/sys/kernel/random/uuid)
+    echo \$uuid
 }
 
 # Generate key pair for reality
 generate_keypair() {
-    keypair=$(/etc/sing-box/bin/sing-box generate reality-keypair)
-    private_key=$(echo "$keypair" | grep "PrivateKey" | awk '{print $1}' | cut -d '=' -f 2)
-    public_key=$(echo "$keypair" | grep "PublicKey" | awk '{print $1}' | cut -d '=' -f 2)
+    keypair=\$(/etc/sing-box/bin/sing-box generate reality-keypair)
+    private_key=\$(echo "\$keypair" | grep "PrivateKey" | awk '{print \$1}' | cut -d '=' -f 2)
+    public_key=\$(echo "\$keypair" | grep "PublicKey" | awk '{print \$1}' | cut -d '=' -f 2)
 }
 
 # Enable BBR
 enable_bbr() {
     # Check kernel version (BBR requires 4.9 or higher)
-    kernel_version=$(uname -r | awk -F. '{print $1"."$2}')
-    kernel_major=$(echo $kernel_version | awk -F. '{print $1}')
-    kernel_minor=$(echo $kernel_version | awk -F. '{print $2}')
-    if [[ $kernel_major -lt 4 || ($kernel_major -eq 4 && $kernel_minor -lt 9) ]]; then
-        _red "当前内核版本 ($kernel_version) 不支持 BBR，需要 4.9 或更高版本。"
+    kernel_version=\$(uname -r | awk -F. '{print \$1"."\$2}')
+    kernel_major=\$(echo \$kernel_version | awk -F. '{print \$1}')
+    kernel_minor=\$(echo \$kernel_version | awk -F. '{print \$2}')
+    if [[ \$kernel_major -lt 4 || (\$kernel_major -eq 4 && \$kernel_minor -lt 9) ]]; then
+        _red "当前内核版本 (\$kernel_version) 不支持 BBR，需要 4.9 或更高版本。"
         return 1
     fi
 
     # Check if BBR is already enabled
-    current_congestion=$(sysctl -n net.ipv4.tcp_congestion_control)
-    if [[ "$current_congestion" == "bbr" ]]; then
+    current_congestion=\$(sysctl -n net.ipv4.tcp_congestion_control)
+    if [[ "\$current_congestion" == "bbr" ]]; then
         _green "BBR 已启用，无需重复操作。"
         return 0
     fi
@@ -502,7 +522,7 @@ enable_bbr() {
     sysctl -p
 
     # Verify
-    if [[ $(sysctl -n net.ipv4.tcp_congestion_control) != "bbr" ]]; then
+    if [[ \$(sysctl -n net.ipv4.tcp_congestion_control) != "bbr" ]]; then
         _red "BBR 启用失败，请检查系统设置。"
         return 1
     fi
@@ -529,21 +549,21 @@ add_protocol() {
         "VLESS-HTTP2-REALITY"
         "退出"
     )
-    select protocol in "${protocols[@]}"; do
-        case $protocol in
+    select protocol in "\${protocols[@]}"; do
+        case \$protocol in
             "Hysteria2")
-                uuid=$(generate_uuid)
+                uuid=\$(generate_uuid)
                 port=8443
-                cat >> $is_config_json << EOT
+                cat >> \$is_config_json << EOT
 ,
         {
             "type": "hysteria2",
             "tag": "hysteria2-in",
             "listen": "::",
-            "listen_port": $port,
+            "listen_port": \$port,
             "users": [
                 {
-                    "password": "$uuid"
+                    "password": "\$uuid"
                 }
             ],
             "tls": {
@@ -554,22 +574,22 @@ add_protocol() {
             }
         }
 EOT
-                _green "已添加 Hysteria2 协议，端口: $port，密码: $uuid"
+                _green "已添加 Hysteria2 协议，端口: \$port，密码: \$uuid"
                 break
                 ;;
             "VMess-WS")
-                uuid=$(generate_uuid)
+                uuid=\$(generate_uuid)
                 port=8080
-                cat >> $is_config_json << EOT
+                cat >> \$is_config_json << EOT
 ,
         {
             "type": "vmess",
             "tag": "vmess-ws-in",
             "listen": "::",
-            "listen_port": $port,
+            "listen_port": \$port,
             "users": [
                 {
-                    "uuid": "$uuid"
+                    "uuid": "\$uuid"
                 }
             ],
             "transport": {
@@ -578,23 +598,23 @@ EOT
             }
         }
 EOT
-                _green "已添加 VMess-WS 协议，端口: $port，UUID: $uuid"
+                _green "已添加 VMess-WS 协议，端口: \$port，UUID: \$uuid"
                 break
                 ;;
             "VLESS-REALITY")
-                uuid=$(generate_uuid)
+                uuid=\$(generate_uuid)
                 generate_keypair
                 port=443
-                cat >> $is_config_json << EOT
+                cat >> \$is_config_json << EOT
 ,
         {
             "type": "vless",
-            "tag": "vless-reality-$port",
+            "tag": "vless-reality-\$port",
             "listen": "::",
-            "listen_port": $port,
+            "listen_port": \$port,
             "users": [
                 {
-                    "uuid": "$uuid",
+                    "uuid": "\$uuid",
                     "flow": "xtls-rprx-vision"
                 }
             ],
@@ -607,21 +627,21 @@ EOT
                         "server": "www.microsoft.com",
                         "server_port": 443
                     },
-                    "private_key": "$private_key",
-                    "public_key": "$public_key",
+                    "private_key": "\$private_key",
+                    "public_key": "\$public_key",
                     "short_id": ["12345678"]
                 }
             }
         }
 EOT
-                _green "已添加 VLESS-REALITY 协议，端口: $port，UUID: $uuid"
+                _green "已添加 VLESS-REALITY 协议，端口: \$port，UUID: \$uuid"
                 break
                 ;;
             "退出")
                 exit 0
                 ;;
             *)
-                _red "暂不支持 $protocol 协议，请选择其他协议。"
+                _red "暂不支持 \$protocol 协议，请选择其他协议。"
                 ;;
         esac
     done
@@ -640,47 +660,88 @@ main_menu() {
         "卸载 Sing-box"
         "退出"
     )
-    select opt in "${options[@]}"; do
-        case $opt in
-            "添加协议")
-                add_protocol
-                ;;
-            "查看配置")
-                cat $is_config_json
-                ;;
-            "重启服务")
-                systemctl restart sing-box
-                _green "Sing-box 服务已重启。"
-                ;;
-            "查看日志")
-                tail -n 50 $is_core_dir/log/sing-box.log
-                ;;
-            "启用 BBR")
-                enable_bbr
-                ;;
-            "卸载 Sing-box")
-                systemctl stop sing-box
-                systemctl disable sing-box
-                rm -rf /etc/systemd/system/sing-box.service
-                rm -rf $is_core_dir
-                rm -f /usr/local/bin/sing-box /usr/local/bin/sb
-                sed -i '/alias sb=/d' /root/.bashrc
-                sed -i '/alias sing-box=/d' /root/.bashrc
-                _green "Sing-box 已卸载。"
-                exit 0
-                ;;
-            "退出")
-                exit 0
-                ;;
-            *)
-                _red "无效选项"
-                ;;
-        esac
+    for i in "\${!options[@]}"; do
+        echo "\$((i+1))) \${options[\$i]}"
     done
+    echo -n "请选择 [1-\${#options[@]}]: "
+    read choice
+    case \$choice in
+        1)
+            add_protocol
+            ;;
+        2)
+            cat \$is_config_json
+            ;;
+        3)
+            systemctl restart sing-box
+            _green "Sing-box 服务已重启。"
+            ;;
+        4)
+            tail -n 50 \$is_core_dir/log/sing-box.log
+            ;;
+        5)
+            enable_bbr
+            ;;
+        6)
+            # Stop and disable the service
+            systemctl stop sing-box
+            systemctl disable sing-box
+            # Remove systemd service file
+            rm -rf /etc/systemd/system/sing-box.service
+            # Remove Sing-box directory (includes config.json with added protocols)
+            rm -rf \$is_core_dir
+            # Remove log directory
+            rm -rf \$is_log_dir
+            # Remove management scripts
+            rm -f /usr/local/bin/sing-box /usr/local/bin/sb
+            # Remove aliases from .bashrc
+            sed -i '/alias sb=/d' /root/.bashrc
+            sed -i '/alias sing-box=/d' /root/.bashrc
+            # Remove temporary directory
+            rm -rf \$tmpdir
+            # Remove install script
+            if [[ -f "\$install_script_path" ]]; then
+                _yellow "正在删除安装脚本: \$install_script_path"
+                rm -f "\$install_script_path"
+            fi
+            # Prompt to remove core file if specified
+            if [[ -n "\$is_core_file" && -f "\$is_core_file" ]]; then
+                read -p "是否删除自定义 Sing-box 二进制文件 \$is_core_file？(y/n, 默认 n): " remove_core_file
+                if [[ "\$remove_core_file" == "y" ]]; then
+                    rm -f "\$is_core_file"
+                    _green "已删除自定义 Sing-box 二进制文件: \$is_core_file"
+                fi
+            fi
+            # Prompt to remove installed packages
+            read -p "是否卸载安装时添加的依赖包（\$is_pkg）？(y/n, 默认 n): " remove_pkgs
+            if [[ "\$remove_pkgs" == "y" ]]; then
+                if [[ "\$cmd" == "apt-get" ]]; then
+                    \$cmd remove -y \$is_pkg
+                    \$cmd autoremove -y
+                elif [[ "\$cmd" == "yum" || "\$cmd" == "dnf" ]]; then
+                    \$cmd remove -y \$is_pkg
+                elif [[ "\$cmd" == "pacman" ]]; then
+                    \$cmd -R --noconfirm \$is_pkg
+                elif [[ "\$cmd" == "apk" ]]; then
+                    \$cmd del \$is_pkg
+                fi
+                _green "已卸载依赖包: \$is_pkg"
+            fi
+            _green "Sing-box 已彻底卸载。"
+            exit 0
+            ;;
+        7)
+            exit 0
+            ;;
+        *)
+            _red "无效选项"
+            ;;
+    esac
+    main_menu
 }
 
 # Main
-[[ ! -f $is_config_json ]] && err "Sing-box 未安装，请先运行安装脚本。"
+[[ ! -f \$is_config_json ]] && err "Sing-box 未安装，请先运行安装脚本。"
 main_menu
 EOF
     chmod +x $is_sh_dir/sing-box.sh
@@ -816,6 +877,10 @@ main() {
     # Create systemd service
     msg ok "创建 systemd 服务..."
     create_systemd_service
+
+    # Generate VLESS URL
+    msg ok "生成 VLESS 分享链接..."
+    generate_vless_url
 
     # Show installation summary
     clear
